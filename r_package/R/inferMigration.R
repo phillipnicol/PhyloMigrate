@@ -30,12 +30,16 @@ estimateMigration <- function(cnr,
   names(true_pos) <- labels
   #Prune
   wmp <- Sankoff(trw,pos,labels,A)
-  zero.rows <- which(wmp$meta[,3] < 10^{-2})
-  print(length(zero.rows))
-  if(length(zero.rows > 0)) {
-    wmp$meta <- wmp$meta[-zero.rows,]
+  #zero.rows <- which(wmp$meta[,3] < 10^{-2})
+  #print(length(zero.rows))
+  #if(length(zero.rows > 0)) {
+  #  wmp$meta <- wmp$meta[-zero.rows,]
+  #}
+  if(perturb==TRUE) {
+    wmp$meta[,3] <- wmp$meta[,3] + 1
   }
-  out <- Newton(wmp$meta,Q,wmp$ntran/sum(trw$edge.length))
+
+  out <- Newton(wmp$meta,Q,wmp$ntran/sum(wmp$meta[,3]))
   alpha.mt <- out$alpha
   alpha_sd <- out$var
 
@@ -179,7 +183,7 @@ Newton <- function(meta, Q, alphastart) {
 
   while(TRUE) {
     alpha.new <- alpha-deriv(meta,alpha,Q)/second.deriv(meta,alpha,Q)
-    if(abs(alpha.new-alpha) < 0.001) {
+    if(abs(alpha.new-alpha) < 10^{-5}) {
       alpha <- alpha.new
       var <- -1/second.deriv(meta,alpha,Q)
       break
@@ -377,5 +381,8 @@ A2Q <- function(A) {
   return(Q)
 }
 
+new.w <- function(l,d,u,q) {
+  -1/(2*l*log(1-u)) + q*(l+d+2*l*u)/(2*l*u*(l+d))
+}
 
 
