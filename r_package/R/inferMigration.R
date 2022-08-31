@@ -30,18 +30,19 @@ estimateMigration <- function(cnr,
   names(true_pos) <- labels
   #Prune
   wmp <- Sankoff(trw,pos,labels,A)
-  #zero.rows <- which(wmp$meta[,3] < 10^{-2})
-  #print(length(zero.rows))
-  #if(length(zero.rows > 0)) {
-  #  wmp$meta <- wmp$meta[-zero.rows,]
-  #}
-  if(perturb==TRUE) {
-    wmp$meta[,3] <- wmp$meta[,3] + 1
+  min.nz <- min(wmp$meta[wmp$meta[,3] > 0,3])
+  zero.rows <- which(wmp$meta[,3] < 10^{-10})
+  print(length(zero.rows))
+  if(perturb) {
+    wmp$meta[,3] <- wmp$meta[,3] + 0.001
+  } else if(length(zero.rows) > 0) {
+    wmp$meta <- wmp$meta[-zero.rows,]
   }
 
-  out <- Newton(wmp$meta,Q,wmp$ntran/sum(wmp$meta[,3]))
-  alpha.mt <- out$alpha
-  alpha_sd <- out$var
+  out <- optim(par=wmp$ntran/sum(wmp$meta[,3]),fn=fn,gr=gr,Q=Q,
+        meta=wmp$meta,method="L-BFGS-B",lower=10^{-10},hessian=TRUE)
+  alpha.mt <- out$par
+  alpha_sd <- 1/out$hessian
 
 
   Ac <- A
@@ -188,10 +189,13 @@ Newton <- function(meta, Q, alphastart) {
       var <- -1/second.deriv(meta,alpha,Q)
       break
     }
-    alpha <- alpha.new
-    if(alpha < 0) {
-      alpha <- 0.01
+
+    if(alpha.new < 0) {
+      alpha <- alpha/2
+    } else {
+      alpha <- alpha.new
     }
+    print(alpha)
   }
   out <- list()
   out$var <- var
@@ -206,6 +210,25 @@ log.lik <- function(meta, alpha, Q) {
     sum <- sum+log(expm(alpha*meta[i,3]*Q)[u,v])
   }
   sum
+}
+
+fn <- function(alpha,meta,Q) {
+  scores <- apply(meta,1,function(x) {
+    u <- x[1]; v <- x[2]
+    log(expm(alpha*x[3]*Q)[u,v])
+  })
+  -sum(scores)
+}
+
+gr <- function(alpha,meta, Q) {
+  scores <- apply(meta,1,function(x) {
+    u <- x[1]; v <- x[2]
+    P <- expm(alpha*x[3]*Q)
+    num <- (Q %*% P)[u,v]
+    denom <- P[u,v]
+    x[3]*num/denom
+  })
+  -sum(scores)
 }
 
 deriv <- function(meta, alpha, Q) {
@@ -229,7 +252,7 @@ second.deriv <- function(meta, alpha, Q) {
     P <- expm(alpha*meta[i,3]*Q)
     denom <- P[u,v]^2
 
-    num1 <- w*P[u,v]*(Q2 %*% P)[u,v]
+    num1 <- w^2*P[u,v]*(Q2 %*% P)[u,v]
     num2 <- w*((Q %*% P)[u,v])^2
     sum <- sum + w*((num1-num2)/denom)
   }
@@ -381,8 +404,98 @@ A2Q <- function(A) {
   return(Q)
 }
 
-new.w <- function(l,d,u,q) {
-  -1/(2*l*log(1-u)) + q*(l+d+2*l*u)/(2*l*u*(l+d))
+
+
+#Distance matrix M
+# Position
+
+#' @export
+estimateMigrationCov <- function(cnr,
+                                pos,
+                                A.list,
+                                patients,
+                                dist.method="euclidean",
+                                pat.x) {
+
+  meta <- matrix(0,nrow=0,ncol=5)
+  pats <- unique(patients)
+  cntr <- 1
+  Q.list <- list()
+  for(pa in pats) {
+    ixs <- which(patients==pa)
+    cnr.sub <- cnr[,ixs]
+    cnr.sub <- cbind(rep(0,nrow(cnr.sub)),cnr.sub)
+    colnames(cnr.sub)[1] <- "PD"
+    M <- as.matrix(dist(t(cnr.sub),method=dist.method))
+
+    Q <- A2Q(A.list[[cntr]])
+
+    trw <- fastme.bal(M)
+    trw <- root(trw,outgroup="PD",resolve.root=TRUE)
+    trw <- drop.tip(trw,tip="PD")
+
+    cnr.sub <- cnr.sub[,-1]
+    M <- M[-1,]; M <- M[,-1]
+    labels <- colnames(cnr.sub)
+    true_pos <- pos[ixs]
+    names(true_pos) <- labels
+
+    wmp <- Sankoff(trw,pos[ixs],labels,A.list[[cntr]])
+    min.nz <- min(wmp$meta[wmp$meta[,3] > 0,3])
+    zero.rows <- which(wmp$meta[,3] == 0)
+    print(length(zero.rows))
+    if(length(zero.rows > 0)) {
+      wmp$meta <- wmp$meta[-zero.rows,]
+    }
+
+    wmp$meta <- cbind(wmp$meta,rep(pat.x[cntr],nrow(wmp$meta)),
+                      rep(cntr,nrow(wmp$meta)))
+    Q.list[[cntr]] <- Q
+    cntr <- cntr+1
+
+    meta <- rbind(meta,wmp$meta)
+  }
+
+  mle <- optim(par=c(0,0),fn=log.lik.cov,gr=gr.covariate,
+               method="BFGS",meta,Q.list,hessian=TRUE,
+               control=list(trace=TRUE))
+
+  #if(perturb) {
+  #  wmp$meta[,3] <- wmp$meta[,3] + 0.01
+  #}
+
+
+  out <- list()
+  out$cov <- mle$par
+  out$se <- sqrt(diag(solve(mle$hessian)))
+  return(out)
+}
+
+log.lik.cov <- function(x,meta,Q.list) {
+  sum <- 0
+  for(i in 1:nrow(meta)) {
+    mu <- exp(x[1]+x[2]*meta[i,4])
+    u <- meta[i,1]; v <- meta[i,2]
+    sum <- sum+log(expm(mu*meta[i,3]*Q.list[[meta[i,5]]])[u,v])
+  }
+  -sum
+}
+
+gr.covariate <- function(x,meta,Q.list) {
+  gr <- c(0,0)
+  sum1 <- 0
+  sum2 <- 0
+  for(i in 1:nrow(meta)) {
+    u <- meta[i,1]; v <- meta[i,2]
+    mu <- exp(x[1]+x[2]*meta[i,4])
+
+    P <- expm(meta[i,3]*mu*Q.list[[meta[i,5]]])
+    num <- (Q.list[[meta[i,5]]] %*% P)[u,v]
+    denom <- P[u,v]
+    sum1 <- sum1 + mu*meta[i,3]*num/denom
+    sum2 <- sum2+meta[i,4]*meta[i,3]*mu*num/denom
+  }
+  return(c(-sum1,-sum2))
 }
 
 
