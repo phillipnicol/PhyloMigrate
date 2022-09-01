@@ -25,9 +25,13 @@ estimateMigration <- function(cnr,
   #trw$edge.length <- rep(1,length(trw$edge.length))
   cnr <- cnr[,-1]
   M <- M[-1,]; M <- M[,-1]
-  labels <- colnames(cnr)
-  true_pos <- pos
-  names(true_pos) <- labels
+  if(is.null(colnames(cnr))) {
+    labels <- 1:ncol(cnr)
+  } else {
+    labels <- colnames(cnr)
+    true_pos <- pos
+    names(true_pos) <- labels
+  }
   #Prune
   wmp <- Sankoff(trw,pos,labels,A)
   min.nz <- min(wmp$meta[wmp$meta[,3] > 0,3])
