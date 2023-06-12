@@ -503,3 +503,128 @@ gr.covariate <- function(x,meta,Q.list) {
 }
 
 
+getVu <- function(t, d, Q) {
+  Mat <- matrix(0, nrow=nrow(Q), ncol=ncol(Q))
+  for(i in 1:nrow(Mat)) {
+    for(j in 1:ncol(Mat)) {
+      if(i != j) {
+        Mat[i,j] <- (exp(d[i]*t)-exp(d[j]*t))/(d[i]-d[j])
+      } else{
+        Mat[i,j] <- t*exp(d[i]*t)
+      }
+    }
+  }
+  return(Mat)
+}
+
+#Here alpha is a vector
+gr2 <- function(alpha,meta, Q) {
+  A <- Q
+  ixs <- which((row(A) != col(A)) & (Q > 10^{-10}))
+  A[ixs] <- alpha
+  diag(A) <- 0
+  diag(A) <- -rowSums(A)
+
+  decomp <- eigen(A)
+  D <- diag(decomp$values)
+  X <- decomp$vectors
+
+  r <- length(alpha)
+  nabla <- rep(0, r)
+
+  for(u in 1:r) {
+    E <- matrix(0, nrow=nrow(Q), ncol=ncol(Q))
+    E[which(row(A) != col(A))[u]] <- 1
+    Gu <- solve(X) %*% E %*% X
+
+    scores <- apply(meta,1,function(x) {
+      Vu <- Gu*getVu(x[3], decomp$values, Q)
+      Deriv <- X %*% Vu %*% solve(X)
+
+      num <- Deriv[x[1],x[2]]
+      denom <- expm(x[3]*A)[x[1],x[2]]
+
+      x[3]*Re(num)/Re(denom)
+    })
+    nabla[u] <- -sum(scores)
+  }
+  nabla
+}
+
+fn2 <- function(alpha, meta, Q) {
+  A <- Q
+  ixs <- which((row(A) != col(A)) & (Q > 10^{-10}))
+  A[ixs] <- alpha
+  diag(A) <- 0
+  diag(A) <- -rowSums(A)
+
+  scores <- apply(meta,1,function(x) {
+    u <- x[1]; v <- x[2]
+    log(expm(x[3]*A)[u,v])
+  })
+  -sum(scores)
+}
+
+estimateMigration2 <- function(cnr,
+                              pos,
+                              A,
+                              nrep=100,
+                              perturb=FALSE,
+                              dist.method="euclidean") {
+  cnr <- cbind(rep(0,nrow(cnr)),cnr)
+  colnames(cnr)[1] <- "PD"
+  M <- as.matrix(dist(t(cnr),method=dist.method))
+
+  Q <- A2Q(A)
+
+  trw <- fastme.bal(M)
+  trw <- root(trw,outgroup="PD",resolve.root=TRUE)
+  trw <- drop.tip(trw,tip="PD")
+
+  #trw$edge.length <- rep(1,length(trw$edge.length))
+  cnr <- cnr[,-1]
+  M <- M[-1,]; M <- M[,-1]
+  if(is.null(colnames(cnr))) {
+    labels <- 1:ncol(cnr)
+  } else {
+    labels <- colnames(cnr)
+    true_pos <- pos
+    names(true_pos) <- labels
+  }
+  #Prune
+  wmp <- Sankoff(trw,pos,labels,A)
+  min.nz <- min(wmp$meta[wmp$meta[,3] > 0,3])
+  zero.rows <- which(wmp$meta[,3] < 10^{-10})
+  print(length(zero.rows))
+  if(perturb) {
+    wmp$meta[,3] <- wmp$meta[,3] + 0.001
+  } else if(length(zero.rows) > 0) {
+    wmp$meta <- wmp$meta[-zero.rows,]
+  }
+
+  alpha.dim <- sum(Q > 10^{-10})
+  alpha.start <- rep(wmp$ntran/sum(wmp$meta[,3]),alpha.dim) + rnorm(n=alpha.dim,sd=0.05)
+  alpha.start[alpha.start < 0] <- 10^{-3}
+
+  out <- optim(par=alpha.start,fn=fn2,gr=gr2,Q=Q,
+               meta=wmp$meta,method="L-BFGS-B",lower=10^{-10},hessian=TRUE)
+  cat("Convergence code ", out$convergence, "\n")
+  alpha.mt <- out$par
+  alpha_sd <- sqrt(diag(solve(out$hessian)))
+
+  A <- Q
+  ixs <- which((row(A) != col(A)) & (Q > 10^{-10}))
+  A[ixs] <- alpha.mt
+  diag(A) <- 0
+
+  ig <- graph_from_adjacency_matrix(adjmatrix=A,weighted=TRUE)
+  E(ig)$curved <- 0.2
+  plot(ig, edge.width=10*E(ig)$weight, edge.label = round(E(ig)$weight,2))
+
+  out <- list()
+  out$alpha <- alpha.mt
+  out$ntrans <- wmp$ntran
+  out$alpha.sd <- alpha_sd
+  return(out)
+}
+
