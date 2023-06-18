@@ -544,7 +544,7 @@ gr2 <- function(alpha,meta, Q) {
       num <- Deriv[x[1],x[2]]
       denom <- expm(x[3]*A)[x[1],x[2]]
 
-      x[3]*Re(num)/Re(denom)
+      Re(num)/Re(denom)
     })
     nabla[u] <- -sum(scores)
   }
@@ -606,8 +606,12 @@ estimateMigration2 <- function(cnr,
   alpha.start <- rep(wmp$ntran/sum(wmp$meta[,3]),alpha.dim) + rnorm(n=alpha.dim,sd=0.05)
   alpha.start[alpha.start < 0] <- 10^{-3}
 
-  out <- optim(par=alpha.start,fn=fn2,gr=gr2,Q=Q,
-               meta=wmp$meta,method="L-BFGS-B",lower=10^{-10},hessian=TRUE)
+  #out <- optim(par=alpha.start,fn=fn2,gr=gr2,Q=Q,
+               #meta=wmp$meta,method="L-BFGS-B",lower=10^{-10},hessian=TRUE)
+
+
+  out <- optim(par=alpha.start,fn=fn2,Q=Q,
+               meta=wmp$meta, lower=10^{-10}, method="L-BFGS-B")
   cat("Convergence code ", out$convergence, "\n")
   alpha.mt <- out$par
   alpha_sd <- sqrt(diag(solve(out$hessian)))
