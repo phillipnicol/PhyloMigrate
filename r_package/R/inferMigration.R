@@ -534,7 +534,9 @@ gr2 <- function(alpha,meta, Q) {
 
   for(u in 1:r) {
     E <- matrix(0, nrow=nrow(Q), ncol=ncol(Q))
-    E[which(row(A) != col(A))[u]] <- 1
+    E[which((row(A) != col(A)) & (Q > 10^{-10}))[u]] <- 1
+    myrow <- which(rowSums(E) > 0)
+    E[myrow,myrow] <- -1
     Gu <- solve(X) %*% E %*% X
 
     scores <- apply(meta,1,function(x) {
@@ -606,12 +608,12 @@ estimateMigration2 <- function(cnr,
   alpha.start <- rep(wmp$ntran/sum(wmp$meta[,3]),alpha.dim) + rnorm(n=alpha.dim,sd=0.05)
   alpha.start[alpha.start < 0] <- 10^{-3}
 
-  #out <- optim(par=alpha.start,fn=fn2,gr=gr2,Q=Q,
-               #meta=wmp$meta,method="L-BFGS-B",lower=10^{-10},hessian=TRUE)
+  out <- optim(par=alpha.start,fn=fn2,gr=gr2,Q=Q,
+               meta=wmp$meta,method="L-BFGS-B",lower=10^{-10},hessian=TRUE)
 
 
-  out <- optim(par=alpha.start,fn=fn2,Q=Q,
-               meta=wmp$meta, lower=10^{-10}, method="L-BFGS-B")
+  #out <- optim(par=alpha.start,fn=fn2,Q=Q,
+               #meta=wmp$meta, lower=10^{-10}, method="L-BFGS-B",hessian=TRUE)
   cat("Convergence code ", out$convergence, "\n")
   alpha.mt <- out$par
   alpha_sd <- sqrt(diag(solve(out$hessian)))
