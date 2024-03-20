@@ -631,6 +631,7 @@ estimateMigration2 <- function(cnr,
   out$alpha <- alpha.mt
   out$ntrans <- wmp$ntran
   out$alpha.sd <- alpha_sd
+  out$A <- A
   return(out)
 }
 
